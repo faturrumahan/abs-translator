@@ -17,7 +17,7 @@ const OUT_RATE = 24000;
 
 function encodeBase64(bytes: Uint8Array) {
   let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
   return btoa(binary);
 }
 
@@ -31,7 +31,7 @@ function decodeBase64(value: string) {
 function floatToPcm16(input: Float32Array) {
   const out = new Int16Array(input.length);
   for (let i = 0; i < input.length; i += 1) {
-    const s = Math.max(-1, Math.min(1, input[i]));
+    const s = Math.max(-1, Math.min(1, input[i]!));
     out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
   return new Uint8Array(out.buffer);
@@ -41,7 +41,7 @@ function downsample(input: Float32Array, from: number, to: number) {
   if (from === to) return input;
   const ratio = from / to;
   const out = new Float32Array(Math.floor(input.length / ratio));
-  for (let i = 0; i < out.length; i += 1) out[i] = input[Math.floor(i * ratio)];
+  for (let i = 0; i < out.length; i += 1) out[i] = input[Math.floor(i * ratio)]!;
   return out;
 }
 
@@ -169,7 +169,7 @@ export class VoiceSession {
     const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
     const buffer = ctx.createBuffer(1, pcm.length, OUT_RATE);
     const channel = buffer.getChannelData(0);
-    for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 0x8000;
+    for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i]! / 0x8000;
 
     const node = ctx.createBufferSource();
     node.buffer = buffer;

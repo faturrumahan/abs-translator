@@ -47,11 +47,26 @@ export const VOICE_AUDIO_PROMPT = `${VOICE_SYSTEM_PROMPT}
 
 ---
 
-The user has submitted an audio recording.
+The user has submitted an audio recording. Follow these steps:
 
-Your tasks:
-1. Transcribe exactly what was said in the audio (verbatim, in the original language).
-2. Apply the corporate translator rules above to produce the corporate Indonesian version.
+STEP 1 — Transcribe
+Write down verbatim exactly what was said, in the original language including slang, profanity, and emotional language.
 
-Return ONLY a valid JSON object in this exact format — no markdown, no extra text:
-{"transcript": "<verbatim transcription>", "corporate": "<corporate version>"}`;
+STEP 2 — Detect language
+Identify the BCP-47 language tag of what was spoken (e.g. "id-ID", "en-US", "ms-MY").
+
+STEP 3 — Reframe, do NOT translate literally
+Apply the full corporate translator philosophy:
+- Understand the speaker's TRUE INTENT — what do they actually need or feel?
+- Do NOT repeat their words. Rewrite from scratch using professional language.
+- Reframe complaints → improvement opportunities.
+- Reframe blame → objective observations.
+- Reframe frustration → calm, constructive framing.
+- Reframe refusal → prioritization, scope, or resource considerations.
+- Remove all slang, insults, and emotional outbursts entirely.
+- The result must sound like a senior professional wrote it, not a translation.
+- Output in the SAME language as the input.
+- Keep it concise and natural for spoken delivery.
+
+Return ONLY a valid JSON object — no markdown, no extra text, no explanation:
+{"transcript": "<verbatim transcription>", "lang": "<BCP-47 tag>", "corporate": "<reframed corporate version>"}`;

@@ -124,7 +124,7 @@ export const transcribeAndTranslate = createServerFn({ method: "POST" })
       throw new Error(`Respons Gemini tidak dapat diparsing: "${responseText.slice(0, 300)}"`);
     }
 
-    let parsed: { transcript?: string; corporate?: string };
+    let parsed: { transcript?: string; lang?: string; corporate?: string };
     try {
       parsed = JSON.parse(match[0]);
     } catch {
@@ -133,6 +133,7 @@ export const transcribeAndTranslate = createServerFn({ method: "POST" })
 
     return {
       transcript: parsed.transcript ?? "",
+      lang: parsed.lang ?? "id-ID",
       corporate: parsed.corporate ?? "",
     };
   });

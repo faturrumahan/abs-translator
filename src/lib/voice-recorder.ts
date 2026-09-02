@@ -18,7 +18,7 @@ type Handlers = {
   onAudioReady: (
     audioBase64: string,
     mimeType: string,
-  ) => Promise<{ transcript: string; corporate: string }>;
+  ) => Promise<{ transcript: string; lang: string; corporate: string }>;
 };
 
 function chooseMimeType(): string {
@@ -40,6 +40,31 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * Find the best available SpeechSynthesis voice for a given BCP-47 language tag.
+ * Priority: exact match → same language prefix → first available.
+ */
+function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | null {
+  if (!voices.length) return null;
+  const lower = lang.toLowerCase();
+  const prefix = lower.split("-")[0]!;
+
+  // 1. Exact match (e.g. "id-ID")
+  const exact = voices.find((v) => v.lang.toLowerCase() === lower);
+  if (exact) return exact;
+
+  // 2. Same language family (e.g. "id-ID" → "id-XX")
+  const family = voices.find((v) => v.lang.toLowerCase().startsWith(prefix + "-"));
+  if (family) return family;
+
+  // 3. Bare prefix match (e.g. "id")
+  const bare = voices.find((v) => v.lang.toLowerCase() === prefix);
+  if (bare) return bare;
+
+  // 4. No match — return null so the browser uses its default for the lang tag
+  return null;
 }
 
 export class VoiceRecorder {
@@ -111,13 +136,14 @@ export class VoiceRecorder {
         this.handlers.onState("PROCESSING");
 
         let transcript = "";
+        let lang = "id-ID";
         let corporate = "";
 
         try {
           const base64 = await blobToBase64(blob);
           // Strip codec details from mimeType for Gemini (e.g. "audio/webm;codecs=opus" → "audio/webm")
           const cleanMime = this.mimeType.split(";")[0]!;
-          ({ transcript, corporate } = await this.handlers.onAudioReady(base64, cleanMime));
+          ({ transcript, lang, corporate } = await this.handlers.onAudioReady(base64, cleanMime));
         } catch (err) {
           if (!this.destroyed) {
             this.handlers.onError(
@@ -138,7 +164,7 @@ export class VoiceRecorder {
 
         this.handlers.onUserText(transcript);
         this.handlers.onCorporateText(corporate);
-        await this.speak(corporate);
+        await this.speak(corporate, lang);
         resolve();
       };
 
@@ -146,7 +172,7 @@ export class VoiceRecorder {
     });
   }
 
-  private speak(text: string): Promise<void> {
+  private speak(text: string, lang: string): Promise<void> {
     return new Promise((resolve) => {
       const synth = window.speechSynthesis;
       if (!synth || !text) {
@@ -158,20 +184,44 @@ export class VoiceRecorder {
       synth.cancel();
       this.handlers.onState("SPEAKING");
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "id-ID";
-      utterance.rate = 0.92;
+      const doSpeak = () => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = lang;
+        utterance.rate = 0.92;
 
-      utterance.onend = () => {
-        if (!this.destroyed) this.handlers.onState("IDLE");
-        resolve();
-      };
-      utterance.onerror = () => {
-        if (!this.destroyed) this.handlers.onState("IDLE");
-        resolve();
+        // Pick the best matching voice for the detected language.
+        // Browsers load voices asynchronously, so we must query inside the callback.
+        const voices = synth.getVoices();
+        const voice = pickVoice(voices, lang);
+        if (voice) utterance.voice = voice;
+
+        utterance.onend = () => {
+          if (!this.destroyed) this.handlers.onState("IDLE");
+          resolve();
+        };
+        utterance.onerror = () => {
+          if (!this.destroyed) this.handlers.onState("IDLE");
+          resolve();
+        };
+
+        synth.speak(utterance);
       };
 
-      synth.speak(utterance);
+      // Voices may not be loaded yet on first call
+      if (synth.getVoices().length > 0) {
+        doSpeak();
+      } else {
+        let fired = false;
+        const onReady = () => {
+          if (fired) return;
+          fired = true;
+          synth.removeEventListener("voiceschanged", onReady);
+          doSpeak();
+        };
+        synth.addEventListener("voiceschanged", onReady);
+        // Safety fallback: if the event never fires, speak anyway after 1 s
+        setTimeout(onReady, 1000);
+      }
     });
   }
 

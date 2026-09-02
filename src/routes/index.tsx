@@ -148,7 +148,8 @@ function Index() {
       onCorporateText: setCorporate,
       onError: setVoiceError,
       onAudioReady: async (audioBase64, mimeType) => {
-        return transcribe({ data: { apiKey: geminiKey, audioBase64, mimeType } });
+        const res = await transcribe({ data: { apiKey: geminiKey, audioBase64, mimeType } });
+        return { transcript: res.transcript, lang: res.lang, corporate: res.corporate };
       },
     });
     sessionRef.current = recorder;

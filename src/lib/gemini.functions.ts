@@ -22,7 +22,7 @@ export const createGeminiLiveToken = createServerFn({ method: "POST" })
       const token = await ai.authTokens.create({
         config: {
           uses: 1,
-          expireTime: new Date(Date.now() * 1 + 15 * 60_000).toISOString(),
+          expireTime: new Date(Date.now() + 15 * 60_000).toISOString(),
           newSessionExpireTime: new Date(Date.now() + 2 * 60_000).toISOString(),
         },
       });

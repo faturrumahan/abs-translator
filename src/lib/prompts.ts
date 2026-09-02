@@ -38,3 +38,20 @@ Additional voice rules:
 
 // Live model ids evolve; keep the id in one configurable place.
 export const GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-preview";
+
+// Standard model used for batch audio transcription + translation.
+export const GEMINI_AUDIO_MODEL = "gemini-3.6-flash";
+
+/** Prompt sent alongside a recorded audio blob for batch processing. */
+export const VOICE_AUDIO_PROMPT = `${VOICE_SYSTEM_PROMPT}
+
+---
+
+The user has submitted an audio recording.
+
+Your tasks:
+1. Transcribe exactly what was said in the audio (verbatim, in the original language).
+2. Apply the corporate translator rules above to produce the corporate Indonesian version.
+
+Return ONLY a valid JSON object in this exact format — no markdown, no extra text:
+{"transcript": "<verbatim transcription>", "corporate": "<corporate version>"}`;

@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { translateToCorporate } from "@/lib/translate.functions";
-import { createGeminiLiveToken } from "@/lib/gemini.functions";
-import type { VoiceSession, VoiceState } from "@/lib/voice-live";
+import { transcribeAndTranslate, validateGeminiKey } from "@/lib/gemini.functions";
+import type { VoiceRecorder, VoiceState } from "@/lib/voice-recorder";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -42,16 +42,16 @@ const EXAMPLES = [
 
 const VOICE_LABEL: Record<VoiceState, string> = {
   IDLE: "Press to speak",
-  CONNECTING: "Menyambung...",
-  LISTENING: "Listening...",
-  THINKING: "Corporatifying...",
+  RECORDING: "Merekam suara... (tekan End untuk translate)",
+  PROCESSING: "Corporatifying...",
   SPEAKING: "Delivering the corporate version...",
-  ERROR: "Corporate voice engine down",
+  ERROR: "Gagal — coba lagi",
 };
 
 function Index() {
   const translate = useServerFn(translateToCorporate);
-  const mintToken = useServerFn(createGeminiLiveToken);
+  const transcribe = useServerFn(transcribeAndTranslate);
+  const checkGeminiKey = useServerFn(validateGeminiKey);
 
   const [mode, setMode] = useState<Mode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -72,7 +72,7 @@ function Index() {
   const [voiceError, setVoiceError] = useState("");
   const [said, setSaid] = useState("");
   const [corporate, setCorporate] = useState("");
-  const sessionRef = useRef<VoiceSession | null>(null);
+  const sessionRef = useRef<VoiceRecorder | null>(null);
 
   // Keys live only in sessionStorage: they vanish when the tab is closed.
   useEffect(() => {
@@ -81,7 +81,12 @@ function Index() {
     setKeysLoaded(true);
   }, []);
 
-  useEffect(() => () => sessionRef.current?.stop(), []);
+  useEffect(
+    () => () => {
+      sessionRef.current?.destroy();
+    },
+    [],
+  );
 
   function saveKey(which: Mode, value: string) {
     const key = value.trim();
@@ -99,7 +104,7 @@ function Index() {
       setDeepseekKey("");
       setOutput("");
     } else {
-      endVoice();
+      abortVoice();
       setGeminiKey("");
     }
   }
@@ -135,37 +140,37 @@ function Index() {
     setVoiceError("");
     setSaid("");
     setCorporate("");
-    setVoiceState("CONNECTING");
-    try {
-      const { token } = await mintToken({ data: { apiKey: geminiKey } });
-      const { VoiceSession } = await import("@/lib/voice-live");
-      const session = new VoiceSession({
-        onState: setVoiceState,
-        onUserText: (t) => setSaid((prev) => prev + t),
-        onCorporateText: (t) => setCorporate((prev) => prev + t),
-        onError: setVoiceError,
-      });
-      sessionRef.current = session;
-      await session.start(token);
-    } catch (err) {
-      sessionRef.current = null;
-      setVoiceError(
-        err instanceof Error && err.message && !err.message.startsWith("Error")
-          ? err.message
-          : "Gagal memulai sesi suara. Coba lagi.",
-      );
-      setVoiceState("ERROR");
-    }
+
+    const { VoiceRecorder } = await import("@/lib/voice-recorder");
+    const recorder = new VoiceRecorder({
+      onState: setVoiceState,
+      onUserText: setSaid,
+      onCorporateText: setCorporate,
+      onError: setVoiceError,
+      onAudioReady: async (audioBase64, mimeType) => {
+        return transcribe({ data: { apiKey: geminiKey, audioBase64, mimeType } });
+      },
+    });
+    sessionRef.current = recorder;
+    await recorder.start();
   }
 
-  function endVoice() {
-    sessionRef.current?.stop();
+  /** Full end-session flow: stop recording → translate → speak → IDLE. */
+  async function endVoice() {
+    if (!sessionRef.current) return;
+    await sessionRef.current.stop();
+    sessionRef.current = null;
+  }
+
+  /** Immediate abort without translation (mode switch, key removal, unmount). */
+  function abortVoice() {
+    sessionRef.current?.destroy();
     sessionRef.current = null;
     setVoiceState("IDLE");
   }
 
   function chooseMode(next: Mode) {
-    if (mode === "voice" && next !== "voice") endVoice();
+    if (mode === "voice" && next !== "voice") abortVoice();
     setMode(next);
     const hasKey = next === "text" ? deepseekKey : geminiKey;
     if (!hasKey) setSettingsOpen(true);
@@ -234,7 +239,7 @@ function Index() {
             >
               <span className="font-display text-xl uppercase">Voice mode</span>
               <span className="mt-3 block font-display text-sm uppercase">Speak → corporate</span>
-              <span className="mt-4 block text-xs font-bold uppercase">Gemini Live</span>
+              <span className="mt-4 block text-xs font-bold uppercase">Gemini</span>
             </button>
           </div>
         </section>
@@ -271,6 +276,9 @@ function Index() {
               connected={Boolean(geminiKey)}
               onSave={(v) => saveKey("voice", v)}
               onRemove={() => removeKey("voice")}
+              onValidate={async (v) => {
+                await checkGeminiKey({ data: { apiKey: v } });
+              }}
             />
           </div>
         </section>
@@ -368,7 +376,7 @@ function Index() {
         <section className="brutal mt-8 bg-card p-6 text-center sm:p-10">
           <div
             className={`brutal-lg mx-auto flex size-32 items-center justify-center text-5xl ${
-              voiceState === "LISTENING"
+              voiceState === "RECORDING"
                 ? "animate-pulse bg-lime"
                 : voiceState === "SPEAKING"
                   ? "bg-blue"
@@ -451,6 +459,7 @@ function ProviderCard({
   connected,
   onSave,
   onRemove,
+  onValidate,
 }: {
   name: string;
   hint: string;
@@ -458,10 +467,45 @@ function ProviderCard({
   connected: boolean;
   onSave: (value: string) => boolean;
   onRemove: () => void;
+  /** Optional async validation — called before saving. Throw with a user-facing message to reject. */
+  onValidate?: (value: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [err, setErr] = useState("");
+  const [validating, setValidating] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr("");
+
+    const trimmed = draft.trim();
+    if (trimmed.length < 10) {
+      setErr("Key-nya kelihatan belum lengkap.");
+      return;
+    }
+
+    if (onValidate) {
+      setValidating(true);
+      try {
+        await onValidate(trimmed);
+      } catch (error) {
+        const msg =
+          error instanceof Error && error.message ? error.message : "Key tidak valid. Coba lagi.";
+        setErr(msg);
+        setValidating(false);
+        return;
+      }
+      setValidating(false);
+    }
+
+    if (!onSave(trimmed)) {
+      setErr("Key-nya kelihatan belum lengkap.");
+      return;
+    }
+    setDraft("");
+    setEditing(false);
+  }
 
   return (
     <div className="brutal-sm bg-background p-4">
@@ -486,32 +530,22 @@ function ProviderCard({
           </button>
         </div>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!onSave(draft)) {
-              setErr("Key-nya kelihatan belum lengkap.");
-              return;
-            }
-            setDraft("");
-            setErr("");
-            setEditing(false);
-          }}
-          className="mt-3 flex flex-col gap-2"
-        >
+        <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2">
           <input
             type="password"
             autoComplete="off"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={placeholder}
-            className="brutal-sm w-full bg-card px-3 py-2 text-sm font-medium outline-none focus:bg-lime"
+            disabled={validating}
+            className="brutal-sm w-full bg-card px-3 py-2 text-sm font-medium outline-none focus:bg-lime disabled:opacity-50"
           />
           <button
             type="submit"
-            className="brutal-sm brutal-press bg-blue px-3 py-2 font-display text-xs uppercase text-background"
+            disabled={validating || !draft.trim()}
+            className="brutal-sm brutal-press bg-blue px-3 py-2 font-display text-xs uppercase text-background disabled:opacity-50"
           >
-            Simpan key
+            {validating ? "Checking..." : "Simpan key"}
           </button>
           {err && <span className="text-xs font-bold text-destructive">{err}</span>}
         </form>

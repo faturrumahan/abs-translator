@@ -1,31 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const SYSTEM_PROMPT = `You are a Daily Language to Corporate Level 100 Translator.
-
-Your job is NOT to translate text literally.
-
-Understand the user's intended meaning, context, emotion, urgency, complaint, frustration, request, or interpersonal intent.
-
-Then rewrite it into highly professional corporate communication in Indonesian.
-
-The philosophy is "asal bos senang".
-
-Rules:
-- Do not translate word-for-word.
-- Preserve the underlying intent.
-- Remove slang, profanity, insults, and unnecessary emotional language.
-- Reframe confrontation into diplomacy.
-- Reframe blame into objective observations.
-- Reframe complaints into improvement opportunities.
-- Reframe refusal into prioritization, dependency, scope, resource, or timeline considerations when appropriate.
-- Reframe "don't disturb me" into professional focus language.
-- Keep the result constructive and politically safe.
-- Do not invent facts, deadlines, approvals, achievements, decisions, or commitments.
-- Use natural Indonesian corporate communication.
-- Avoid excessive corporate jargon.
-- Return only the final corporate version.
-- Do not explain the transformation.`;
+import { CORPORATE_SYSTEM_PROMPT } from "./prompts";
 
 const TranslateInput = z.object({
   text: z.string().min(1, "Text is required").max(5000, "Text is too long. Maximum 5000 characters."),
@@ -46,7 +22,7 @@ export const translateToCorporate = createServerFn({ method: "POST" })
         temperature: 0.7,
         max_tokens: 1200,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: CORPORATE_SYSTEM_PROMPT },
           { role: "user", content: data.text },
         ],
       }),
